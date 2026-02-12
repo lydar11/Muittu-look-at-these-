@@ -1,0 +1,93 @@
+muittu fix this 
+
+    # ================= USER GIVEAWAY SYSTEM =================
+import time, random, discord
+from discord.ext import tasks
+
+GIVEAWAY_FILE = "global_giveaways.json"
+
+def load_giveaways():
+    if not os.path.exists(GIVEAWAY_FILE):
+        return {"giveaways": {}}
+    with open(GIVEAWAY_FILE, "r") as f:
+        return json.load(f)
+
+def save_giveaways(data):
+    with open(GIVEAWAY_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+def build_giveaway_embed(gw):
+    remaining = max(0, int(gw["end_time"] - time.time()))
+    count = len(gw["participants"])
+    embed = discord.Embed(
+        title="🌍 Global Giveaway",
+        color=discord.Color.gold()
+    )
+    embed.add_field(name="🏆 Prize", value=gw["prize"], inline=False)
+    embed.add_field(name="👥 Participants", value=str(count), inline=True)
+    embed.add_field(name="⏳ Time Left", value=f"{remaining}s", inline=True)
+    embed.set_footer(text=f"ID: {gw['id']}")
+    return embed
+
+class GiveawayView(discord.ui.View):
+    def __init__(self, gw_id):
+        super().__init__(timeout=None)
+        self.gw_id = gw_id
+
+    @discord.ui.button(label="🎉 Join", style=discord.ButtonStyle.green)
+    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = load_giveaways()
+        gw = data["giveaways"].get(self.gw_id)
+        if not gw or not gw["active"]:
+            return await interaction.response.send_message("❌ Giveaway ended.", ephemeral=True)
+
+        uid = str(interaction.user.id)
+        if uid in gw["participants"]:
+            return await interaction.response.send_message("✅ Already joined!", ephemeral=True)
+
+        gw["participants"].append(uid)
+        save_giveaways(data)
+        await interaction.response.send_message("🎉 You joined the giveaway!", ephemeral=True)
+        await update_giveaway_embed(interaction.channel, self.gw_id)
+
+    @discord.ui.button(label="🚪 Leave", style=discord.ButtonStyle.red)
+    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = load_giveaways()
+        gw = data["giveaways"].get(self.gw_id)
+        if not gw:
+            return
+        uid = str(interaction.user.id)
+        if uid not in gw["participants"]:
+            return await interaction.response.send_message("❌ You are not in the giveaway.", ephemeral=True)
+
+        gw["participants"].remove(uid)
+        save_giveaways(data)
+        await interaction.response.send_message("🚪 You left the giveaway!", ephemeral=True)
+        await update_giveaway_embed(interaction.channel, self.gw_id)
+
+async def update_giveaway_embed(channel, gw_id):
+    data = load_giveaways()
+    gw = data["giveaways"][gw_id]
+    embed = build_giveaway_embed(gw)
+    try:
+        msg = await channel.fetch_message(gw["message_id"])
+        await msg.edit(embed=embed, view=GiveawayView(gw_id))
+    except:
+        pass
+
+async def end_giveaway(channel, gw_id):
+    data = load_giveaways()
+    gw = data["giveaways"][gw_id]
+    participants = gw["participants"]
+    winners = random.sample(participants, min(len(participants), gw["winners"])) if participants else []
+
+    gw["active"] = False
+    save_giveaways(data)
+
+    winners_text = ", ".join(f"<@{uid}>" for uid in winners) if winners else "No one joined 😭"
+    embed = discord.Embed(
+        title="🎉 Global Giveaway Ended",
+        description=f"🏆 Prize: {gw['prize']}\n🥇 Winners: {winners_text}",
+        color=discord.Color.green()
+    )
+    await channel.send(embed=embed)
